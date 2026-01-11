@@ -1,0 +1,8 @@
+# Environment config for EPyMARL
+env: "collaborative_carry"
+
+env_args:
+  grid_size: 8
+  n_obstacles: 3
+  episode_limit: 100
+  render_mode: null  # Set to "human" for visualization during eval

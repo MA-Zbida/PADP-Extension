@@ -1,0 +1,53 @@
+# MAPPO algorithm config for collaborative carry task
+name: "mappo_collab"
+
+# Runner
+runner: "episode"
+batch_size_run: 8
+
+# Buffer
+buffer_size: 5000
+
+# Training
+t_max: 2000000
+learner: "ppo_learner"
+
+# PPO specific
+action_selector: "soft_policies"
+mask_before_softmax: True
+
+# Network
+agent: "rnn"
+hidden_dim: 64
+use_rnn: True
+
+# PPO hyperparameters
+lr: 0.0005
+critic_lr: 0.0005
+entropy_coef: 0.01
+clip_param: 0.2
+ppo_epochs: 4
+num_mini_batch: 1
+gamma: 0.99
+gae_lambda: 0.95
+use_gae: True
+
+# Gradient clipping
+grad_norm_clip: 10
+
+# Target network
+use_target_network: False
+
+# Logging
+log_interval: 10000
+save_model: True
+save_model_interval: 100000
+
+# Evaluation
+evaluate: True
+eval_interval: 50000
+eval_episodes: 10
+
+# Misc
+use_cuda: False
+seed: 42

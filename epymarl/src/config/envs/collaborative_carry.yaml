@@ -1,0 +1,7 @@
+env: "collaborative_carry"
+
+env_args:
+  key: "collaborative_carry"
+  grid_size: 8
+  n_obstacles: 3
+  episode_limit: 100
