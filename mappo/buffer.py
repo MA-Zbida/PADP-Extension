@@ -79,7 +79,7 @@ class RolloutBuffer:
         
         obs_flat = np.array(obs_flat)
         states_flat = np.array(states_flat)
-        actions_flat = np.array(actions_flat)
+        actions_flat = np.array(actions_flat, dtype=np.int64)
         log_probs_flat = np.array(log_probs_flat)
         returns_flat = np.array(returns_flat)
         advantages_flat = np.array(advantages_flat)

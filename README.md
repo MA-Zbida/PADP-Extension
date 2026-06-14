@@ -1,184 +1,138 @@
-# miniRL - Multi-Agent Cooperative Learning
+# Continuous Warehouse MARL for Cooperative PADP
 
-A reinforcement learning project implementing Multi-Agent Proximal Policy Optimization (MAPPO) for a collaborative object-carrying task in a grid-based environment.
+This project studies a fully Multi-Agent Reinforcement Learning (MARL) version of the Pick and Delivery Problem (PADP). Agents operate in a continuous 2D warehouse, where each object must be picked by exactly two agents from opposite grip zones, carried as a rigid pair, and dropped into a shipping/staging goal.
 
-## Overview
+The implementation uses MAPPO with centralized training and decentralized execution.
 
-This project trains multiple agents to collaboratively pick up and deliver objects to goal locations in a grid world. The agents must work together to carry objects that require multiple agents. The implementation uses MAPPO, a state-of-the-art multi-agent reinforcement learning algorithm.
+## Current Environment
+
+- Continuous normalized warehouse plane: `[0, 1] x [0, 1]`.
+- Depot/charging zone, shipping zone, rack obstacles, and pick-face object spawns.
+- Physical agent-agent collisions: agents cannot overlap or pass through each other.
+- Explicit factorized actions per agent:
+  - Movement: `stay`, `up`, `down`, `left`, `right`.
+  - Interaction: `none`, `pick`, `drop`.
+- Opposite-side pickup:
+  - Valid pairs are `left+right` or `top+bottom`.
+  - Third agents cannot attach to an already held object.
+- Rigid two-agent carrying:
+  - Both holders must choose the same movement action.
+  - If the pair collides with racks, bounds, objects, or another agent, the full group movement is rejected.
+- Delivery:
+  - Both holders must select `drop` while the object is inside an unused goal radius.
 
 ## Project Structure
 
+```text
+environment/
+  actions.py          # Factorized action constants and flattening helpers
+  geometry.py         # Continuous geometry, collision, grip helpers
+  layout.py           # Warehouse depot/rack/pick-face/shipping layout
+  rewards.py          # Reward and metric bookkeeping
+  renderer.py         # Smooth Pygame warehouse renderer
+  env.py              # CollaborativeCarryEnv public environment class
+  epymarl_wrapper.py  # EPyMARL-compatible wrapper
+
+mappo/
+  actor_critic.py     # Two-head MAPPO actor and centralized critic
+  buffer.py           # Rollout buffer for factorized actions
+  mappo_trainer.py    # Custom MAPPO training loop
+
+train.py              # Training entry point
+evaluate.py           # Checkpoint evaluation and visualization
+visualize_env.py      # Standalone environment rendering preview
+Project_State.md      # Research-facing project state and formulation
 ```
-miniRL/
-├── train.py                    # Main training script
-├── evaluate.py                 # Evaluation and visualization script
-├── config/                     # Configuration files
-│   ├── algs/                   # Algorithm configurations
-│   │   └── mappo_collab.yaml   # MAPPO hyperparameters
-│   └── envs/                   # Environment configurations
-│       └── collaborative_carry.yaml
-├── environment/                # Custom environment implementation
-│   ├── env.py                  # CollaborativeCarryEnv class
-│   ├── epymarl_wrapper.py      # Multi-agent wrapper
-│   └── __init__.py
-├── mappo/                      # MAPPO trainer and network implementation
-│   ├── mappo_trainer.py        # MAPPOTrainer class
-│   ├── actor_critic.py         # Actor-Critic network
-│   └── buffer.py               # Rollout buffer
-├── epymarl/                    # Extended PyMARL framework
-└── checkpoints/                # Saved model checkpoints
-```
 
-## Environment Description
-
-The Collaborative Carry environment is a multi-agent cooperative task where:
-
-- Agents spawn in a grid world with obstacles
-- Objects are placed randomly and need to be carried to goal locations
-- Objects require multiple agents (typically 2) to be carried
-- Agents receive rewards for delivering objects to goals
-- Observations include agent positions, nearby objects, obstacles, and state information
-
-### Key Parameters
-
-- `grid_size`: Size of the grid (default: 8)
-- `n_agents`: Number of agents (default: 4)
-- `n_obstacles`: Number of obstacles (default: 4)
-- `episode_limit`: Maximum steps per episode (default: 100)
-
-## Installation
-
-### Requirements
-
-- Python 3.8+
-- PyTorch
-- NumPy
-- Pygame (for visualization)
-
-### Setup
-
-1. Clone or download the project
-2. Install dependencies:
-   ```bash
-   pip install torch numpy pygame
-   ```
-
-## Usage
-
-### Training
-
-To train a MAPPO agent on the collaborative carry task:
+## Training
 
 ```bash
-python train.py
+python train.py --agents 4 --obstacles 4 --grid 8 --timesteps 10000000 --device cpu --n-envs 16
 ```
 
-#### Training Arguments
+Useful arguments:
 
-- `--agents`: Number of agents (default: 4)
-- `--obstacles`: Number of obstacles (default: 4)
-- `--grid`: Grid size (default: 8)
-- `--timesteps`: Total training timesteps (default: 10,000,000)
-- `--device`: Device to use - 'cpu' or 'cuda' (default: 'cpu')
-- `--n-envs`: Number of parallel environments (default: 32)
-- `--save-dir`: Directory to save checkpoints (default: 'checkpoints')
-- `--run-name`: Custom run name for checkpoints
-- `--checkpoint`: Path to checkpoint to resume training from
+- `--agents`: number of warehouse agents.
+- `--obstacles`: number of rack obstacles.
+- `--timesteps`: total environment steps.
+- `--device`: `cpu` or `cuda`.
+- `--n-envs`: number of parallel rollout environments.
+- `--checkpoint`: resume from a checkpoint.
 
-#### Example Commands
+Existing grid-world checkpoints are legacy and are not expected to load into the new continuous/factorized architecture.
 
-Train with custom configuration:
-```bash
-python train.py --agents 4 --obstacles 4 --grid 8 --timesteps 5000000 --device cuda --n-envs 16
-```
-
-Resume from checkpoint:
-```bash
-python train.py --checkpoint checkpoints/run_20240115_120000.pt --timesteps 15000000
-```
-
-### Evaluation
-
-To evaluate a trained model with visualization:
+If you stop training with `Ctrl+C`, the trainer now saves an interrupt checkpoint before exiting:
 
 ```bash
-python evaluate.py
+checkpoints/<run-name>_interrupt_<step>.pt
 ```
 
-#### Evaluation Arguments
+Resume with:
 
-- `--checkpoint`: Path to the checkpoint file (positional argument)
-- `--episodes`: Number of episodes to evaluate (default: 10)
-- `--delay`: Delay between steps in seconds (default: 2.0)
-- `--grid-size`: Grid size for evaluation (default: 8)
-- `--n-agents`: Number of agents (default: 4)
-- `--n-obstacles`: Number of obstacles (default: 4)
-
-#### Example Commands
-
-Evaluate with visualization:
 ```bash
-python evaluate.py checkpoints/t4_o4_g8_final.pt --render --n-episodes 5 --step-delay 1.0
+python train.py --checkpoint checkpoints/<run-name>_interrupt_<step>.pt --agents 4 --obstacles 4 --grid 8 --timesteps 10000000 --device cpu --n-envs 16
 ```
 
-Evaluate without visualization:
+By default, training now uses an obstacle curriculum. If `--obstacles 4` is requested, the run starts with easier layouts and increases the rack count every curriculum stage until it reaches 4. This is intentional: the continuous pickup task is sparse, and the curriculum helps agents discover grip formation before learning obstacle avoidance in dense layouts.
+
+Useful debugging signal in the training log:
+
+- `CanPick` should rise first: agents are reaching valid grip zones.
+- `OppGrip` should rise next: two agents are occupying opposite grips.
+- `Pickups` should become nonzero before `PairSteps`.
+- `PairSteps` should become nonzero once agents learn to hold and move objects together.
+
+To disable the curriculum:
+
 ```bash
-python evaluate.py checkpoints/t4_o4_g8_final.pt --n-episodes 20
+python train.py --agents 4 --obstacles 4 --timesteps 10000000 --no-curriculum
 ```
 
-## Configuration Files
+## Visualizing the Environment First
 
-### Algorithm Configuration (mappo_collab.yaml)
+To inspect the renderer without training or loading a checkpoint:
 
-Contains MAPPO hyperparameters:
-- Learning rate: 0.0005
-- PPO clipping: 0.2
-- Entropy coefficient: 0.01
-- GAE lambda: 0.95
-- Network hidden dimension: 256
+```bash
+python visualize_env.py --mode scripted --agents 4 --obstacles 4 --debug --delay 0.15
+```
 
-### Environment Configuration (collaborative_carry.yaml)
+The scripted preview places two agents on opposite grip zones, shows a valid pickup, flashes a blocked carrier move, moves the blocker aside, carries the crate to shipping, and drops it on the goal pad.
 
-Specifies environment parameters like grid size, number of obstacles, and render mode.
+For a noisy random-action preview of the current reset distribution:
 
-## Pre-trained Checkpoints
+```bash
+python visualize_env.py --mode random --agents 4 --obstacles 4 --debug --delay 0.1
+```
 
-The `checkpoints/` directory contains pre-trained models:
+Close either window with `Q`, `Esc`, or the window close button.
 
-- `t4_o4_g8_final.pt`: Trained on 4 agents, 4 obstacles, 8x8 grid
-- `t6_o6_g12_final.pt`: Trained on 6 agents, 6 obstacles, 12x12 grid
+## Evaluation
 
-## Performance Monitoring
+```bash
+python evaluate.py --checkpoint checkpoints/<checkpoint>.pt --episodes 5 --delay 0.2
+```
 
-During training, the system logs:
-- Episode rewards
-- Average episode length
-- Policy loss
-- Value loss
-- Training progress
+Use `--no-render` for headless evaluation.
 
-Logs are saved in the save directory and can be used to monitor training progress.
+The evaluator reports:
 
-## Advanced Usage
+- Mean reward.
+- Success rate.
+- Completion ratio.
+- Steps to success.
+- Collision counts.
+- Idle actions.
+- Carrier-pair coordination steps.
 
-### Modifying Hyperparameters
+## Research Metrics
 
-Edit `mappo/mappo_trainer.py` Config class to adjust:
-- Network architecture (hidden_dim)
-- Learning rate (lr)
-- PPO parameters (clip_param, ppo_epochs)
-- Training duration (total_timesteps)
+The environment returns rich metrics through `info["metrics"]`, including:
 
-### Custom Environments
+- Valid/invalid pickups and drops.
+- Agent-agent, rack, bound, and object collisions.
+- Carrier-pair steps and carrier movement steps.
+- Overstaffing and blocking.
+- Completion ratio and success.
+- Remaining object-goal distance.
 
-To use the framework with other environments, modify the environment wrapper in `environment/epymarl_wrapper.py`.
-
-## Project Notes
-
-This is a PADP (Pick and Delivery Problem) extension where multiple agents must cooperatively pick up and deliver objects within a grid environment. The implementation uses modern deep reinforcement learning techniques to enable agents to learn complex collaborative behaviors.
-
-## References
-
-- MAPPO: The Multi-Agent PPO algorithm
-- PyTorch: Deep learning framework
-- EPyMARL: Extended PyMARL multi-agent framework
+These metrics are intended to support research reporting beyond episode return and success rate.

@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 from gymnasium import spaces
 
+from environment.actions import NUM_FLAT_ACTIONS, NUM_INTERACTION_ACTIONS, NUM_MOVE_ACTIONS
 from environment.env import CollaborativeCarryEnv
 
 
@@ -37,7 +38,9 @@ class CollaborativeCarryMARL:
         )
         
         self.n_agents = self.env.n_agents
-        self.n_actions = len(self.env._action_to_delta)
+        self.n_move_actions = NUM_MOVE_ACTIONS
+        self.n_interaction_actions = NUM_INTERACTION_ACTIONS
+        self.n_actions = NUM_FLAT_ACTIONS
         self.episode_limit = self.env.max_steps
         
         self._obs = None
@@ -132,6 +135,9 @@ class CollaborativeCarryMARL:
             "state_shape": self.get_state_size(),
             "obs_shape": self.get_obs_size(),
             "n_actions": self.n_actions,
+            "n_move_actions": self.n_move_actions,
+            "n_interaction_actions": self.n_interaction_actions,
+            "factorized_actions": True,
             "n_agents": self.n_agents,
             "episode_limit": self.episode_limit,
         }

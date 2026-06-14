@@ -44,20 +44,24 @@ class Config:
     
     # Training (stabilized for reduced variance rewards)
     total_timesteps: int = 10_000_000
-    lr: float = 2.5e-4            # Reduced LR to stabilize with high loss
+    lr: float = 3e-4              # Slightly higher LR for the new shaped curriculum
     gamma: float = 0.99           # Standard discount
     gae_lambda: float = 0.95      # GAE parameter
     
     # PPO (tuned for stability)
     clip_param: float = 0.2
-    entropy_coef: float = 0.01    # Lower entropy for more exploitation
+    entropy_coef: float = 0.05    # Keep pick/drop exploration alive
     value_coef: float = 0.5
     max_grad_norm: float = 0.5
-    ppo_epochs: int = 5           # Fewer epochs to prevent overfitting per batch
+    ppo_epochs: int = 4           # Avoid overfitting each rollout and collapsing entropy
     num_minibatches: int = 4      # Larger minibatches for stable gradients
     
     # Network
     hidden_dim: int = 256         # Larger network for complex role understanding
+
+    # Curriculum
+    use_obstacle_curriculum: bool = True
+    curriculum_stage_steps: int = 150_000
     
     # Logging
     log_interval: int = 10
@@ -78,13 +82,15 @@ class MAPPOTrainer:
     def __init__(self, config: Config):
         self.config = config
         self.device = torch.device(config.device)
+        self.target_n_obstacles = config.n_obstacles
+        self.current_n_obstacles = self._curriculum_obstacles()
         
         # Create environments
         self.envs = [
             CollaborativeCarryMARL(
                 grid_size=config.grid_size,
                 n_agents=config.n_agents,
-                n_obstacles=config.n_obstacles,
+                n_obstacles=self.current_n_obstacles,
                 max_agents=config.max_agents,
                 max_objects=config.max_objects,
                 max_goals=config.max_goals,
@@ -96,19 +102,24 @@ class MAPPOTrainer:
         
         # Set obstacle count
         for env in self.envs:
-            env.set_n_obstacles(config.n_obstacles)
-        print(f"Training with {config.n_obstacles} obstacle(s)")
+            env.set_n_obstacles(self.current_n_obstacles)
+        print(f"Training with {self.current_n_obstacles} obstacle(s) -> target {self.target_n_obstacles}")
         
         # Get dimensions
         env_info = self.envs[0].get_env_info()
         self.obs_dim = env_info["obs_shape"]
         self.state_dim = env_info["state_shape"]
         self.n_actions = env_info["n_actions"]
+        self.n_move_actions = env_info.get("n_move_actions", self.n_actions)
+        self.n_interaction_actions = env_info.get("n_interaction_actions", 1)
         self.n_agents = env_info["n_agents"]
         
         # Create shared network (parameter sharing across agents)
         self.network = ActorCritic(
-            self.obs_dim, self.state_dim, self.n_actions, config.hidden_dim
+            self.obs_dim,
+            self.state_dim,
+            (self.n_move_actions, self.n_interaction_actions),
+            config.hidden_dim,
         ).to(self.device)
         
         self.optimizer = optim.Adam(self.network.parameters(), lr=config.lr)
@@ -117,19 +128,46 @@ class MAPPOTrainer:
         self.episode_rewards = deque(maxlen=100)
         self.episode_lengths = deque(maxlen=100)
         self.episode_successes = deque(maxlen=100)  # Track success (all objects delivered)
+        self.episode_completion = deque(maxlen=100)
+        self.episode_obstacle_hits = deque(maxlen=100)
+        self.episode_wall_collisions = deque(maxlen=100)
+        self.episode_idle_actions = deque(maxlen=100)
+        self.episode_carrier_pair_steps = deque(maxlen=100)
+        self.episode_can_pick_agents = deque(maxlen=100)
+        self.episode_opposite_grip_pairs = deque(maxlen=100)
+        self.episode_valid_pickups = deque(maxlen=100)
         self.global_step = 0
         self.reward_history: List[Tuple[int, float]] = []  # (global_step, mean_reward)
         self.success_history: List[Tuple[int, float]] = []  # (global_step, success_rate)
         self.moving_avg_history: List[Tuple[int, float]] = []  # (global_step, moving_avg_reward)
+        self.completion_history: List[Tuple[int, float]] = []  # (global_step, completion_rate)
+        self.safety_history: List[Tuple[int, float]] = []  # (global_step, collision count)
+        self.coordination_history: List[Tuple[int, float]] = []  # (global_step, carrier-pair steps)
 
         # Checkpoint naming
         self.checkpoint_prefix = self.config.run_name or "mappo"
         
         # Create save directory
         os.makedirs(config.save_dir, exist_ok=True)
+
+    def _curriculum_obstacles(self) -> int:
+        if not self.config.use_obstacle_curriculum or self.target_n_obstacles <= 0:
+            return self.target_n_obstacles
+        stage = getattr(self, "global_step", 0) // max(1, self.config.curriculum_stage_steps)
+        return int(min(self.target_n_obstacles, stage))
+
+    def _apply_curriculum(self):
+        next_obstacles = self._curriculum_obstacles()
+        if next_obstacles == self.current_n_obstacles:
+            return
+        self.current_n_obstacles = next_obstacles
+        for env in self.envs:
+            env.set_n_obstacles(self.current_n_obstacles)
+        print(f">>> Curriculum: obstacle count is now {self.current_n_obstacles}/{self.target_n_obstacles}")
     
-    def collect_rollouts(self, n_steps: int) -> Tuple[RolloutBuffer, List[float]]:
+    def collect_rollouts(self, n_steps: int) -> Tuple[RolloutBuffer, np.ndarray, np.ndarray, List[float]]:
         """Collect rollout data from all environments."""
+        self._apply_curriculum()
         buffer = RolloutBuffer(
             self.config.n_envs, self.n_agents, n_steps, self.obs_dim, self.state_dim
         )
@@ -164,7 +202,7 @@ class MAPPOTrainer:
                     for a in range(self.n_agents):
                         obs_tensor = torch.FloatTensor(obs_batch[e, a]).unsqueeze(0).to(self.device)
                         action, log_prob, _ = self.network.get_action(obs_tensor)
-                        actions_e.append(action.item())
+                        actions_e.append(action.squeeze(0).cpu().numpy().astype(np.int64).tolist())
                         log_probs_e.append(log_prob.item())
                     actions_batch.append(actions_e)
                     log_probs_batch.append(log_probs_e)
@@ -195,6 +233,15 @@ class MAPPOTrainer:
                     # Track success: all objects delivered (check info dict)
                     success = all(info.get("delivered", [])) if info.get("delivered") else False
                     self.episode_successes.append(success)
+                    metrics = info.get("metrics", {})
+                    self.episode_completion.append(metrics.get("completion_ratio", float(success)))
+                    self.episode_obstacle_hits.append(metrics.get("cumulative_obstacle_hits", 0.0))
+                    self.episode_wall_collisions.append(metrics.get("cumulative_wall_collisions", 0.0))
+                    self.episode_idle_actions.append(metrics.get("cumulative_idle_actions", 0.0))
+                    self.episode_carrier_pair_steps.append(metrics.get("cumulative_carrier_pair_steps", 0.0))
+                    self.episode_can_pick_agents.append(metrics.get("cumulative_can_pick_agents", 0.0))
+                    self.episode_opposite_grip_pairs.append(metrics.get("cumulative_opposite_grip_pairs", 0.0))
+                    self.episode_valid_pickups.append(metrics.get("cumulative_valid_pickups", 0.0))
                     
                     self.ep_rewards[e] = 0.0
                     self.ep_lengths[e] = 0
@@ -322,7 +369,7 @@ class MAPPOTrainer:
                     for a in range(self.n_agents):
                         obs_tensor = torch.FloatTensor(obs[a]).unsqueeze(0).to(self.device)
                         action, _, _ = self.network.get_action(obs_tensor, deterministic=True)
-                        actions.append(action.item())
+                        actions.append(action.squeeze(0).cpu().numpy().astype(np.int64).tolist())
                 
                 reward, done, info = eval_env.step(actions)
                 episode_reward += reward
@@ -345,6 +392,17 @@ class MAPPOTrainer:
             "global_step": self.global_step,
         }, path)
         print(f"Saved checkpoint to {path}")
+
+    def save_interrupt_checkpoint(self) -> str:
+        """Persist training state after a keyboard interruption."""
+        ckpt_path = os.path.join(
+            self.config.save_dir,
+            f"{self.checkpoint_prefix}_interrupt_{self.global_step}.pt",
+        )
+        self.save(ckpt_path)
+        self.save_reward_plot(os.path.join(self.config.save_dir, "reward.png"))
+        self.save_metrics_plot(os.path.join(self.config.save_dir, "metrics.png"))
+        return ckpt_path
 
     def save_reward_plot(self, path: str):
         """Save reward vs global_step plot to the given path."""
@@ -373,7 +431,7 @@ class MAPPOTrainer:
         if len(self.reward_history) < 2:
             return  # Not enough points to plot
         
-        fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+        fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
         
         # Plot 1: Rewards
         steps, rewards = zip(*self.reward_history)
@@ -386,16 +444,35 @@ class MAPPOTrainer:
         axes[0].legend(loc='upper left')
         axes[0].grid(True, alpha=0.3)
         
-        # Plot 2: Success Rate
+        # Plot 2: Success and completion
         if len(self.success_history) >= 2:
             s_steps, s_rates = zip(*self.success_history)
             axes[1].plot(s_steps, s_rates, label="Success Rate (%)", color='green', linewidth=2)
             axes[1].fill_between(s_steps, 0, s_rates, alpha=0.2, color='green')
-        axes[1].set_xlabel("Global Step")
-        axes[1].set_ylabel("Success Rate (%)")
+        if len(self.completion_history) >= 2:
+            c_steps, c_rates = zip(*self.completion_history)
+            axes[1].plot(c_steps, c_rates, label="Completion (%)", color='olive', linewidth=2, linestyle='--')
+        axes[1].set_ylabel("Task Completion (%)")
         axes[1].set_ylim(0, 105)
         axes[1].legend(loc='upper left')
         axes[1].grid(True, alpha=0.3)
+
+        # Plot 3: Safety events
+        if len(self.safety_history) >= 2:
+            safe_steps, safety_events = zip(*self.safety_history)
+            axes[2].plot(safe_steps, safety_events, label="Obstacle + Wall/Object Hits", color='red', linewidth=2)
+        axes[2].set_ylabel("Safety Events")
+        axes[2].legend(loc='upper left')
+        axes[2].grid(True, alpha=0.3)
+
+        # Plot 4: Coordination proxy
+        if len(self.coordination_history) >= 2:
+            coord_steps, pair_steps = zip(*self.coordination_history)
+            axes[3].plot(coord_steps, pair_steps, label="Carrier-Pair Steps", color='purple', linewidth=2)
+        axes[3].set_xlabel("Global Step")
+        axes[3].set_ylabel("Pair Steps")
+        axes[3].legend(loc='upper left')
+        axes[3].grid(True, alpha=0.3)
         
         plt.tight_layout()
         plt.savefig(path)
@@ -412,65 +489,90 @@ class MAPPOTrainer:
     def train(self):
         """Main training loop."""
         print(f"Starting MAPPO training on {self.config.device}")
-        print(f"Obs dim: {self.obs_dim}, State dim: {self.state_dim}, Actions: {self.n_actions}")
+        print(
+            f"Obs dim: {self.obs_dim}, State dim: {self.state_dim}, "
+            f"Actions: move={self.n_move_actions}, interaction={self.n_interaction_actions}"
+        )
         print(f"Obstacles: {self.config.n_obstacles}, Timesteps: {self.config.total_timesteps:,}")
         print("-" * 60)
         
         n_steps_per_update = 128
         n_updates = 0
-        
-        while self.global_step < self.config.total_timesteps:
-            # Collect rollouts
-            buffer, returns, advantages, ep_rewards = self.collect_rollouts(n_steps_per_update)
-            
-            # Train
-            train_info = self.train_step(buffer, returns, advantages)
-            n_updates += 1
-            
-            # Logging
-            if n_updates % self.config.log_interval == 0:
-                max_reward = max(self.episode_rewards) if self.episode_rewards else 0
-                min_reward = min(self.episode_rewards) if self.episode_rewards else 0
-                mean_reward = np.mean(self.episode_rewards) if self.episode_rewards else 0
-                mean_length = np.mean(self.episode_lengths) if self.episode_lengths else 0
+        try:
+            while self.global_step < self.config.total_timesteps:
+                # Collect rollouts
+                buffer, returns, advantages, ep_rewards = self.collect_rollouts(n_steps_per_update)
                 
-                # Compute moving average reward (exponential moving average)
-                if not hasattr(self, '_ema_reward'):
-                    self._ema_reward = mean_reward
-                else:
-                    alpha = 0.05  # Smoothing factor for EMA
-                    self._ema_reward = alpha * mean_reward + (1 - alpha) * self._ema_reward
-                moving_avg_reward = self._ema_reward
+                # Train
+                train_info = self.train_step(buffer, returns, advantages)
+                n_updates += 1
                 
-                # Compute success rate (percentage of episodes where all objects delivered)
-                success_rate = np.mean(self.episode_successes) * 100 if self.episode_successes else 0
-                
-                # Track and plot rewards
-                self.reward_history.append((self.global_step, mean_reward))
-                self.success_history.append((self.global_step, success_rate))
-                self.moving_avg_history.append((self.global_step, moving_avg_reward))
-                
-                # Save plots
-                self.save_reward_plot(os.path.join(self.config.save_dir, "reward.png"))
-                self.save_metrics_plot(os.path.join(self.config.save_dir, "metrics.png"))
+                # Logging
+                if n_updates % self.config.log_interval == 0:
+                    max_reward = max(self.episode_rewards) if self.episode_rewards else 0
+                    min_reward = min(self.episode_rewards) if self.episode_rewards else 0
+                    mean_reward = np.mean(self.episode_rewards) if self.episode_rewards else 0
+                    mean_length = np.mean(self.episode_lengths) if self.episode_lengths else 0
+                    
+                    # Compute moving average reward (exponential moving average)
+                    if not hasattr(self, '_ema_reward'):
+                        self._ema_reward = mean_reward
+                    else:
+                        alpha = 0.05  # Smoothing factor for EMA
+                        self._ema_reward = alpha * mean_reward + (1 - alpha) * self._ema_reward
+                    moving_avg_reward = self._ema_reward
+                    
+                    # Compute success rate (percentage of episodes where all objects delivered)
+                    success_rate = np.mean(self.episode_successes) * 100 if self.episode_successes else 0
+                    completion_rate = np.mean(self.episode_completion) * 100 if self.episode_completion else 0
+                    mean_obstacle_hits = np.mean(self.episode_obstacle_hits) if self.episode_obstacle_hits else 0
+                    mean_wall_collisions = np.mean(self.episode_wall_collisions) if self.episode_wall_collisions else 0
+                    mean_carrier_pair_steps = np.mean(self.episode_carrier_pair_steps) if self.episode_carrier_pair_steps else 0
+                    mean_can_pick_agents = np.mean(self.episode_can_pick_agents) if self.episode_can_pick_agents else 0
+                    mean_opposite_grip_pairs = np.mean(self.episode_opposite_grip_pairs) if self.episode_opposite_grip_pairs else 0
+                    mean_valid_pickups = np.mean(self.episode_valid_pickups) if self.episode_valid_pickups else 0
+                    
+                    # Track and plot rewards
+                    self.reward_history.append((self.global_step, mean_reward))
+                    self.success_history.append((self.global_step, success_rate))
+                    self.moving_avg_history.append((self.global_step, moving_avg_reward))
+                    self.completion_history.append((self.global_step, completion_rate))
+                    self.safety_history.append((self.global_step, mean_obstacle_hits + mean_wall_collisions))
+                    self.coordination_history.append((self.global_step, mean_carrier_pair_steps))
+                    
+                    # Save plots
+                    self.save_reward_plot(os.path.join(self.config.save_dir, "reward.png"))
+                    self.save_metrics_plot(os.path.join(self.config.save_dir, "metrics.png"))
 
-                print(f"Step {self.global_step:>8} | "
-                      f"Reward: {mean_reward:>7.2f} | "
-                      f"MovAvg: {moving_avg_reward:>7.2f} | "
-                      f"Success: {success_rate:>5.1f}% | "
-                      f"Length: {mean_length:>5.1f} | "
-                      f"Loss: {train_info['loss']:.4f} | "
-                      f"Entropy: {train_info['entropy']:.4f}")
-            
-            # Evaluation
-            if self.global_step % self.config.eval_interval == 0:
-                eval_reward = self.evaluate(self.config.eval_episodes)
-                print(f">>> Evaluation: {eval_reward:.2f}")
-            
-            # Save
-            if self.global_step % self.config.save_interval == 0:
-                ckpt_path = os.path.join(self.config.save_dir, f"{self.checkpoint_prefix}_{self.global_step}.pt")
-                self.save(ckpt_path)
+                    print(f"Step {self.global_step:>8} | "
+                          f"Reward: {mean_reward:>7.2f} | "
+                          f"MovAvg: {moving_avg_reward:>7.2f} | "
+                          f"Success: {success_rate:>5.1f}% | "
+                          f"Comp: {completion_rate:>5.1f}% | "
+                          f"Coll: {mean_obstacle_hits + mean_wall_collisions:>5.1f} | "
+                          f"CanPick: {mean_can_pick_agents:>5.1f} | "
+                          f"OppGrip: {mean_opposite_grip_pairs:>5.1f} | "
+                          f"Pickups: {mean_valid_pickups:>5.1f} | "
+                          f"PairSteps: {mean_carrier_pair_steps:>5.1f} | "
+                          f"Length: {mean_length:>5.1f} | "
+                          f"Loss: {train_info['loss']:.4f} | "
+                          f"Entropy: {train_info['entropy']:.4f}")
+                
+                # Evaluation
+                if self.global_step % self.config.eval_interval == 0:
+                    eval_reward = self.evaluate(self.config.eval_episodes)
+                    print(f">>> Evaluation: {eval_reward:.2f}")
+                
+                # Save
+                if self.global_step % self.config.save_interval == 0:
+                    ckpt_path = os.path.join(self.config.save_dir, f"{self.checkpoint_prefix}_{self.global_step}.pt")
+                    self.save(ckpt_path)
+        except KeyboardInterrupt:
+            print("\nKeyboard interrupt received. Saving checkpoint before exit...")
+            interrupt_path = self.save_interrupt_checkpoint()
+            print(f"Interrupt checkpoint saved to {interrupt_path}")
+            print(f"Resume with the same training arguments and: --checkpoint \"{interrupt_path}\"")
+            return
         
         # Final save
         final_path = os.path.join(self.config.save_dir, f"{self.checkpoint_prefix}_final.pt")
@@ -482,9 +584,18 @@ class MAPPOTrainer:
         # Print final summary
         final_success_rate = np.mean(self.episode_successes) * 100 if self.episode_successes else 0
         final_mean_reward = np.mean(self.episode_rewards) if self.episode_rewards else 0
+        final_completion = np.mean(self.episode_completion) * 100 if self.episode_completion else 0
+        final_safety_events = (
+            (np.mean(self.episode_obstacle_hits) if self.episode_obstacle_hits else 0)
+            + (np.mean(self.episode_wall_collisions) if self.episode_wall_collisions else 0)
+        )
+        final_pair_steps = np.mean(self.episode_carrier_pair_steps) if self.episode_carrier_pair_steps else 0
         print(f"\n{'='*60}")
         print(f"Training complete!")
         print(f"Final Success Rate: {final_success_rate:.1f}%")
+        print(f"Final Completion: {final_completion:.1f}%")
         print(f"Final Mean Reward: {final_mean_reward:.2f}")
+        print(f"Final Safety Events/Episode: {final_safety_events:.2f}")
+        print(f"Final Carrier-Pair Steps/Episode: {final_pair_steps:.2f}")
         print(f"Final Moving Avg Reward: {self._ema_reward:.2f}" if hasattr(self, '_ema_reward') else "")
         print(f"{'='*60}")

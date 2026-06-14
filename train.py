@@ -25,6 +25,12 @@ def main():
                         help="PPO running on the device")
     parser.add_argument("--n-envs", type=int, default=32,
                         help="How many parallel envs to run (depends heavily on your device)")
+    parser.add_argument("--no-curriculum", action="store_true",
+                        help="Disable obstacle curriculum and train immediately at --obstacles")
+    parser.add_argument("--curriculum-stage-steps", type=int, default=None,
+                        help="Steps between obstacle curriculum increases")
+    parser.add_argument("--entropy-coef", type=float, default=None,
+                        help="Override entropy coefficient")
     args = parser.parse_args()
     
     config = Config()
@@ -36,6 +42,11 @@ def main():
     config.run_name = args.run_name or time.strftime("run_%Y%m%d_%H%M%S")
     config.device = args.device
     config.n_envs = args.n_envs
+    config.use_obstacle_curriculum = not args.no_curriculum
+    if args.curriculum_stage_steps is not None:
+        config.curriculum_stage_steps = args.curriculum_stage_steps
+    if args.entropy_coef is not None:
+        config.entropy_coef = args.entropy_coef
     
     # Set seeds
     np.random.seed(config.seed)

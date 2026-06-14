@@ -14,6 +14,7 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 from mappo.mappo_trainer import ActorCritic, Config
+from environment.actions import INTERACTION_NAMES, MOVE_NAMES
 from environment.epymarl_wrapper import CollaborativeCarryMARL
 
 
@@ -54,7 +55,7 @@ def evaluate(
     network = ActorCritic(
         env_info["obs_shape"],
         env_info["state_shape"],
-        env_info["n_actions"],
+        (env_info.get("n_move_actions", env_info["n_actions"]), env_info.get("n_interaction_actions", 1)),
         config.hidden_dim
     ).to(device)
     
@@ -67,9 +68,8 @@ def evaluate(
     print(f"Step delay: {step_delay}s (press Q to quit, SPACE to pause)")
     print("-" * 40)
     
-    ACTION_NAMES = ["UP", "DOWN", "LEFT", "RIGHT", "STAY"]
-    
     total_rewards = []
+    episode_metrics = []
     successes = 0
     paused = False
     
@@ -78,6 +78,7 @@ def evaluate(
         episode_reward = 0
         done = False
         step = 0
+        last_info = {}
         
         print(f"\n=== Episode {ep + 1} ===")
         
@@ -108,17 +109,20 @@ def evaluate(
                 for a in range(env_info["n_agents"]):
                     obs_tensor = torch.FloatTensor(obs[a]).unsqueeze(0).to(device)
                     action, _, _ = network.get_action(obs_tensor, deterministic=True)
-                    actions.append(action.item())
+                    actions.append(action.squeeze(0).cpu().numpy().astype(np.int64).tolist())
 
             reward, done, info = env.step(actions)
             episode_reward += reward
             step += 1
+            last_info = info
             
             # Print step info for all agents
             action_str = " | ".join([
-                f"A{idx+1}:{ACTION_NAMES[act]:<5}" for idx, act in enumerate(actions)
+                f"A{idx+1}:{MOVE_NAMES[act[0]]}/{INTERACTION_NAMES[act[1]]:<4}" for idx, act in enumerate(actions)
             ])
-            print(f"  Step {step:>3}: {action_str} | R={reward:>+6.2f}")
+            metrics = info.get("metrics", {})
+            completion = 100 * metrics.get("completion_ratio", 0.0)
+            print(f"  Step {step:>3}: {action_str} | R={reward:>+6.2f} | C={completion:>5.1f}%")
             
             if render:
                 env.render()
@@ -127,18 +131,35 @@ def evaluate(
             obs = env.get_obs()
         
         total_rewards.append(episode_reward)
+        metrics = last_info.get("metrics", {})
+        episode_metrics.append(metrics)
         
-        # Check if succeeded (high reward means delivery)
-        if episode_reward > 5:
+        # Success means all objects reached a delivery goal.
+        if bool(metrics.get("success", 0.0)):
             successes += 1
         
-        print(f"Episode {ep + 1}: Reward = {episode_reward:.2f}, Steps = {step}")
+        print(
+            f"Episode {ep + 1}: Reward = {episode_reward:.2f}, "
+            f"Steps = {step}, Completion = {100 * metrics.get('completion_ratio', 0.0):.1f}%"
+        )
     
     env.close()
+
+    def mean_metric(name: str) -> float:
+        return float(np.mean([m.get(name, 0.0) for m in episode_metrics])) if episode_metrics else 0.0
+
+    successful_steps = [m.get("steps", 0.0) for m in episode_metrics if m.get("success", 0.0)]
+    mean_success_steps = float(np.mean(successful_steps)) if successful_steps else float("nan")
     
     print("-" * 40)
-    print(f"Mean Reward: {np.mean(total_rewards):.2f} ± {np.std(total_rewards):.2f}")
+    print(f"Mean Reward: {np.mean(total_rewards):.2f} +/- {np.std(total_rewards):.2f}")
     print(f"Success Rate: {successes}/{n_episodes} ({100*successes/n_episodes:.1f}%)")
+    print(f"Mean Completion: {100 * mean_metric('completion_ratio'):.1f}%")
+    print(f"Mean Steps to Success: {mean_success_steps:.1f}")
+    print(f"Mean Obstacle Hits: {mean_metric('cumulative_obstacle_hits'):.2f}")
+    print(f"Mean Wall/Object Collisions: {mean_metric('cumulative_wall_collisions'):.2f}")
+    print(f"Mean Idle Actions: {mean_metric('cumulative_idle_actions'):.2f}")
+    print(f"Mean Carrier-Pair Steps: {mean_metric('cumulative_carrier_pair_steps'):.2f}")
 
 
 def main():
