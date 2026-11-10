@@ -205,3 +205,23 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# --- PADP project outputs ---
+runs/
+*.pt
+**/tb/
+results/**/_smoke*/
+# The generic "env/" and "ENV/" virtualenv rules above would hide the package folder.
+!padp/env/
+.pytest_tmp/
+
+# LaTeX build files
+*.aux
+*.bbl
+*.blg
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+build.log
+main.log

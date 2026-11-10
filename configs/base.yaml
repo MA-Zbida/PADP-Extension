@@ -1,0 +1,57 @@
+# Default settings. Experiment files in configs/experiments/ override these.
+# Any value can also be overridden on the command line: --set train.lr=1e-4 env.n_agents=4
+
+env:
+  n_agents: 4
+  n_objects: 2
+  n_racks: 4
+  layout: warehouse          # warehouse (racks + pick faces) | open (no racks)
+  spawn: depot               # depot | near_objects (agents start next to objects)
+  carry_distance: null       # [min, max] object-to-goal distance; null = layout default
+  max_steps: 200
+  capacities: [50]           # kg, sampled per agent each episode
+  weights: [90]              # kg, sampled per object each episode
+  attach_mode: incremental   # incremental (attach and wait for help) | simultaneous (all must pick together)
+  coupling_rule: strict      # strict (identical moves) | average (mean of moves) | leader (lowest index steers)
+  reward_mode: shaped        # shaped (potential-based) | sparse (delivery + step cost)
+  reward:
+    delivery: 10.0
+    step: -0.01
+    collision: -0.05
+    invalid: -0.01
+    attach_potential: 0.5
+    lift_potential: 1.0
+    carry_potential: 3.0
+    approach_potential: 1.0
+    gamma: 0.99              # keep equal to train.gamma
+  max_agents: 6              # padding sizes: keep fixed so observation sizes match across settings
+  max_objects: 3
+  max_racks: 6
+  max_capacity: 100.0
+  max_weight: 200.0
+
+train:
+  total_steps: 2000000       # environment steps, summed over parallel environments
+  n_envs: 16
+  rollout_len: 128
+  lr: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip: 0.2
+  entropy_coef: 0.02
+  value_coef: 0.5
+  max_grad_norm: 0.5
+  epochs: 4
+  minibatches: 4
+  hidden: 256
+  sampler: independent       # independent | coupled (object-anchored shared noise) | global | coupled_move (ablations)
+  anchor_error: 0.0          # coupled samplers: probability per agent and step of a wrong anchor (robustness)
+  critic: central            # central (MAPPO) | local (IPPO)
+  optimistic: false          # clip advantages at zero (OptiMAPPO-style baseline)
+  rack_curriculum_steps: 0   # 0 = off; otherwise add one rack every N steps
+  log_every: 20000
+  eval_every: 200000
+  eval_episodes: 20
+  save_every: 200000
+  device: cpu
+  threads: 1                 # torch threads per run; keep 1 when running several runs in parallel

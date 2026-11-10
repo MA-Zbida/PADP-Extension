@@ -1,0 +1,26 @@
+name: e4_pilot
+description: >
+  A difficulty ladder from the e1_mechanism setting toward e4_main, adding one ingredient per
+  level: two_k2 = 4 agents and 2 objects that each need 2 agents (open floor, agents start near
+  the objects); mixed = the same with e4_main's capacities and weights; depot = mixed with agents
+  starting at the depot and objects anywhere on the floor. 2 seeds.
+base: e4_main.yaml
+seeds: [0, 1]
+overrides:
+  env:
+    layout: open
+    n_racks: 0
+  train:
+    total_steps: 1500000
+    rack_curriculum_steps: 0
+grid:
+  - name: level
+    levels:
+      two_k2: {env.spawn: near_objects, env.carry_distance: [0.2, 0.3], env.capacities: [50], env.weights: [90]}
+      mixed: {env.spawn: near_objects, env.carry_distance: [0.2, 0.3]}
+      depot: {env.spawn: depot}
+  - name: method
+    levels:
+      mappo: {train.sampler: independent}
+      coupled: {train.sampler: coupled}
+compare: {factor: method, baseline: mappo, treatment: coupled}

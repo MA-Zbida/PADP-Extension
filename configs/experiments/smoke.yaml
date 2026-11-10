@@ -1,0 +1,22 @@
+name: smoke
+description: >
+  Pipeline check (about 3 minutes on a laptop CPU): training, logging, evaluation and checkpoints.
+  Not a result.
+base: ../base.yaml
+seeds: [0]
+overrides:
+  env:
+    layout: open
+    n_racks: 0
+    n_agents: 3
+    n_objects: 1
+    spawn: near_objects
+    weights: [90]
+    carry_distance: [0.2, 0.3]
+    max_steps: 100
+  train:
+    total_steps: 200000
+    sampler: coupled
+    log_every: 10000
+    eval_every: 50000
+    save_every: 50000

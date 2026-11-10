@@ -1,0 +1,14 @@
+name: e4_sparse
+description: >
+  The e4_main task with only delivery reward and a step cost (no shaping).
+base: e4_main.yaml
+seeds: [0, 1, 2, 3, 4]
+overrides:
+  env:
+    reward_mode: sparse
+grid:
+  - name: method
+    levels:
+      mappo: {train.sampler: independent}
+      coupled: {train.sampler: coupled}
+compare: {factor: method, baseline: mappo, treatment: coupled}

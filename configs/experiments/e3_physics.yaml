@@ -1,0 +1,27 @@
+name: e3_physics
+description: >
+  The k=2 long-carry task under three carrying rules: strict (the group moves only if all holders
+  choose the same move), average (mean displacement) and leader (the lowest-index holder steers).
+base: ../base.yaml
+seeds: [0, 1, 2, 3, 4]
+overrides:
+  env:
+    layout: open
+    n_racks: 0
+    n_agents: 3
+    n_objects: 1
+    spawn: near_objects
+    capacities: [50]
+    weights: [90]
+    carry_distance: [0.45, 0.55]
+    max_steps: 100
+  train:
+    total_steps: 2000000
+grid:
+  - name: sampler
+    key: train.sampler
+    levels: {indep: independent, coupled: coupled}
+  - name: physics
+    key: env.coupling_rule
+    levels: {strict: strict, average: average, leader: leader}
+compare: {factor: sampler, baseline: indep, treatment: coupled}

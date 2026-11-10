@@ -1,0 +1,26 @@
+name: e4_coalition
+description: >
+  Open floor, 4 agents with capacities 30/50/80 kg starting near 2 objects of 40/90/140 kg,
+  carries of 0.2-0.3: agents must decide whether they need help and form coalitions of 1 to 4.
+  Compares MAPPO, coupled MAPPO, IPPO, optimistic MAPPO and a leader-follower reference under
+  identical hyperparameters.
+base: e4_main.yaml
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+overrides:
+  env:
+    layout: open
+    n_racks: 0
+    spawn: near_objects
+    carry_distance: [0.2, 0.3]
+  train:
+    total_steps: 3000000
+    rack_curriculum_steps: 0
+grid:
+  - name: method
+    levels:
+      mappo: {train.sampler: independent}
+      coupled: {train.sampler: coupled}
+      ippo: {train.sampler: independent, train.critic: local}
+      optimistic: {train.sampler: independent, train.optimistic: true}
+      leader: {train.sampler: independent, env.coupling_rule: leader}
+compare: {factor: method, baseline: mappo, treatment: coupled}

@@ -1,0 +1,30 @@
+name: e1_mechanism
+description: >
+  Coalition size and carry length. Three agents of capacity 50 kg and one object on an open floor;
+  the object's weight sets how many agents must carry it (40 kg -> k=1, 90 kg -> k=2, 140 kg ->
+  k=3). Short or long carries, independent or coupled sampling. Seeds 5-9 are run only for the k2
+  and k3 cells.
+base: ../base.yaml
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+overrides:
+  env:
+    layout: open
+    n_racks: 0
+    n_agents: 3
+    n_objects: 1
+    spawn: near_objects
+    capacities: [50]
+    max_steps: 100
+  train:
+    total_steps: 2000000
+grid:
+  - name: sampler
+    key: train.sampler
+    levels: {indep: independent, coupled: coupled}
+  - name: k
+    key: env.weights
+    levels: {k1: [40], k2: [90], k3: [140]}
+  - name: carry
+    key: env.carry_distance
+    levels: {short: [0.2, 0.3], long: [0.45, 0.55]}
+compare: {factor: sampler, baseline: indep, treatment: coupled}

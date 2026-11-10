@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "padp"
+version = "0.2.0"
+description = "Agreement-gated cooperative transport: a continuous warehouse MARL testbed"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+include = ["padp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# A repo-local temp folder avoids Windows permission problems with the default pytest temp dir.
+addopts = "--basetemp=.pytest_tmp"

@@ -1,0 +1,30 @@
+name: e4_main
+description: >
+  Full warehouse with racks and agents starting at the depot, with mixed capacities (30/50/80 kg)
+  and weights (40/90/140 kg), so agents must decide whether they need help and form coalitions.
+  Compares MAPPO, coupled MAPPO, IPPO, optimistic MAPPO and a leader-follower reference under
+  identical hyperparameters.
+base: ../base.yaml
+seeds: [0, 1, 2, 3, 4]
+overrides:
+  env:
+    layout: warehouse
+    n_racks: 4
+    n_agents: 4
+    n_objects: 2
+    spawn: depot
+    capacities: [30, 50, 80]
+    weights: [40, 90, 140]
+    max_steps: 200
+  train:
+    total_steps: 3000000
+    rack_curriculum_steps: 250000   # same for every method: racks appear gradually
+grid:
+  - name: method
+    levels:
+      mappo: {train.sampler: independent}
+      coupled: {train.sampler: coupled}
+      ippo: {train.sampler: independent, train.critic: local}
+      optimistic: {train.sampler: independent, train.optimistic: true}
+      leader: {train.sampler: independent, env.coupling_rule: leader}
+compare: {factor: method, baseline: mappo, treatment: coupled}

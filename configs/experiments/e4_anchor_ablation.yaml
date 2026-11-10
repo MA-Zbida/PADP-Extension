@@ -1,0 +1,14 @@
+name: e4_anchor_ablation
+description: >
+  Variants of coupled sampling on the e4_coalition task and seeds: global (every agent shares one
+  noise stream, ignoring anchors), coupled_move (coupling on the movement head only), err10 /
+  err30 (each agent uses a wrong anchor with probability 0.1 / 0.3 per step).
+base: e4_coalition.yaml
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+grid:
+  - name: method
+    levels:
+      global: {train.sampler: global}
+      coupled_move: {train.sampler: coupled_move}
+      err10: {train.sampler: coupled, train.anchor_error: 0.1}
+      err30: {train.sampler: coupled, train.anchor_error: 0.3}
