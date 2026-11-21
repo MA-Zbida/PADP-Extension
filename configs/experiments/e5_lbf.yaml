@@ -1,0 +1,26 @@
+name: e5_lbf
+description: >
+  Level-Based Foraging (lbforaging 2.0), full observability, 50-step episodes, agent levels 1-2,
+  food levels from the package defaults. coop tasks force cooperation (every food's level is the sum
+  of the three lowest agent levels); the noncoop task is the standard mixed task. Anchors come from
+  each agent's own observation (the grid cell of the adjacent food). MAPPO against coupled MAPPO,
+  10 seeds, identical hyperparameters; 2M steps on the 8x8 tasks and 6M on the larger ones.
+base: ../base.yaml
+seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+overrides:
+  env:
+    kind: lbf
+  train:
+    total_steps: 2000000
+grid:
+  - name: sampler
+    levels:
+      mappo: {train.sampler: independent}
+      coupled: {train.sampler: coupled}
+  - name: task
+    levels:
+      coop8x8_2p2f: {env.lbf: {players: 2, field_size: 8, max_num_food: 2, force_coop: true}}
+      coop10x10_3p3f: {env.lbf: {players: 3, field_size: 10, max_num_food: 3, force_coop: true}, train.total_steps: 6000000}
+      coop15x15_4p3f: {env.lbf: {players: 4, field_size: 15, max_num_food: 3, force_coop: true}, train.total_steps: 6000000}
+      noncoop8x8_2p2f: {env.lbf: {players: 2, field_size: 8, max_num_food: 2, force_coop: false}}
+compare: {factor: sampler, baseline: mappo, treatment: coupled}

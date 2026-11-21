@@ -77,10 +77,20 @@ def _dataclass_from(cls, values: Dict[str, Any]):
     return cls(**values)
 
 
-def build_configs(config: Dict[str, Any]) -> Tuple[EnvConfig, TrainConfig]:
+def build_configs(config: Dict[str, Any]) -> Tuple[Any, TrainConfig]:
+    """Environment config (EnvConfig, or LBFConfig when env.kind is "lbf") and TrainConfig."""
     env = dict(config.get("env", {}))
+    train = _dataclass_from(TrainConfig, dict(config.get("train", {})))
+    kind = env.pop("kind", "warehouse")
+    lbf = env.pop("lbf", None)
+    if kind == "lbf":
+        from padp.env.lbf import LBFConfig
+
+        return _dataclass_from(LBFConfig, dict(lbf or {})), train
+    if kind != "warehouse":
+        raise ValueError(f"env.kind={kind!r}; expected 'warehouse' or 'lbf'")
     env["reward"] = _dataclass_from(RewardConfig, env.get("reward", {}) or {})
-    return _dataclass_from(EnvConfig, env), _dataclass_from(TrainConfig, dict(config.get("train", {})))
+    return _dataclass_from(EnvConfig, env), train
 
 
 @dataclass

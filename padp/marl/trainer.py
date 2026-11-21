@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 
 from padp.env.config import EnvConfig
-from padp.env.warehouse import WarehouseEnv
+from padp.env.factory import make_env
 from padp.marl.buffer import RolloutBuffer
 from padp.marl.config import TrainConfig
 from padp.marl.logger import RunLogger
@@ -43,7 +43,7 @@ class Trainer:
         self.rng = np.random.default_rng(cfg.seed)
         self.device = torch.device(cfg.device)
 
-        self.envs = [WarehouseEnv(env_cfg) for _ in range(cfg.n_envs)]
+        self.envs = [make_env(env_cfg) for _ in range(cfg.n_envs)]
         self.n_agents = env_cfg.n_agents
         probe = self.envs[0]
         self.heads = (probe.n_move_actions, probe.n_interact_actions)
@@ -185,7 +185,7 @@ class Trainer:
 
     def evaluate(self) -> Dict[str, float]:
         """Fixed-seed episodes with stochastic (configured sampler) and greedy actions."""
-        env = WarehouseEnv(self.env_cfg)
+        env = make_env(self.env_cfg)
         noise = NoiseSource(self.cfg.sampler, self.cfg.seed + 7777, self.heads, self.cfg.anchor_error)
         results: Dict[str, float] = {}
         for mode in ("stochastic", "greedy"):

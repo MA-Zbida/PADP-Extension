@@ -44,6 +44,8 @@ Each experiment is a YAML file in [configs/experiments/](configs/experiments/). 
 | `e4_pilot.yaml` | Difficulty ladder toward the full warehouse | 12 |
 | `e4_coalition.yaml` | Open floor, heterogeneous coalitions: five methods | 50 |
 | `e4_anchor_ablation.yaml` | Variants of the coupled sampler (global noise, movement only, wrong anchors) | 40 |
+| `e5_lbf_pilot.yaml` | Level-Based Foraging (cooperative and standard tasks) x sampler, short pilot | 16 |
+| `e5_lbf.yaml` | Level-Based Foraging (cooperative and standard tasks) x sampler | 80 |
 
 The toy game in `scripts/toy_agreement_game.py` checks the sampler on a matrix-style agreement task
 in a few minutes.
@@ -58,13 +60,13 @@ trajectories bit for bit.
 
 ```
 padp/
-  env/        warehouse.py (rules), config.py, rewards.py, layout.py, geometry.py, actions.py, renderer.py
+  env/        warehouse.py (rules), lbf.py (Level-Based Foraging adapter), factory.py, config.py, rewards.py, ...
   marl/       trainer.py (PPO loop), sampler.py (independent / coupled noise), networks.py, buffer.py, logger.py
   utils/      config_io.py (YAML, grids, --set), stats.py (IQM, bootstrap, tests)
 configs/      base.yaml and experiments/*.yaml
 scripts/      train, sweep, analyze, evaluate, visualize, toy_agreement_game
 tests/        rules, reward, seeding, reference trajectories, sampler, training loop, tooling
-docs/         environment specification
+docs/         environment specification, Level-Based Foraging setup
 runs/         training outputs (git-ignored)
 ```
 
@@ -92,7 +94,8 @@ Each run writes `runs/<experiment>/<variant>/seed<k>/`:
 - `latest.pt`, `final.pt`: checkpoints
 
 To inspect a trained run: `python scripts/evaluate.py runs/<experiment>/<variant>/seed0 --render`.
-The environment is specified in [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md).
+The environment is specified in [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md); the Level-Based Foraging
+setup (observation, reward, anchors, metrics) in [docs/LBF.md](docs/LBF.md).
 
 ## License
 

@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from padp.env.warehouse import WarehouseEnv
+from padp.env.factory import make_env
 from padp.marl.networks import ActorCritic
 from padp.marl.sampler import NoiseSource, gumbel_argmax
 from padp.marl.trainer import EVAL_SEED_BASE, nanmean
@@ -42,7 +42,7 @@ def main(argv=None) -> int:
 
     config = load_yaml(args.run_dir / "config.yaml")
     env_cfg, train_cfg = build_configs(config)
-    env = WarehouseEnv(env_cfg)
+    env = make_env(env_cfg)
     heads = (env.n_move_actions, env.n_interact_actions)
     sampler = train_cfg.sampler if args.sampler == "trained" else args.sampler
     noise = NoiseSource(sampler, train_cfg.seed + 7777, heads)

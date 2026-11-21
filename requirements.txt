@@ -7,3 +7,4 @@ scipy>=1.11
 matplotlib>=3.8
 tensorboard>=2.20  # 2.19 and older crash on Python 3.13 (imghdr was removed)
 pytest>=7.4
+lbforaging==2.0.0  # Level-Based Foraging experiments (e5_*); the rest of the code runs without it
